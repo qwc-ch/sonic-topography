@@ -18,7 +18,7 @@ import {
 	Volume2,
 } from "lucide-react";
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { engine } from "../../lib/AudioEngine";
 import {
 	type DisplaySettings,
@@ -515,6 +515,41 @@ export function UI({
 		return () => window.clearInterval(intervalId);
 	}, []);
 
+	const getCurrentQueue = (): MetingSong[] => {
+		const activePlaylist =
+			playlists.find((p) => p.id === activePlaylistId) || playlists[0];
+		if (playQueue.length > 0) return playQueue;
+		if (activePlaylist?.songs.length > 0) return activePlaylist.songs;
+		return metingPlaylist;
+	};
+
+	const playFromQueueRef = useRef<
+		(direction: 1 | -1, fromSongId?: string) => void
+	>(() => {});
+
+	playFromQueueRef.current = (
+		direction: 1 | -1,
+		fromSongId = currentSongId,
+	) => {
+		const queue = getCurrentQueue();
+		if (queue.length === 0) return;
+		let nextIndex = 0;
+		const currentIndex = queue.findIndex(
+			(song) => songIdentity(song) === fromSongId,
+		);
+
+		if (playMode === "shuffle" && queue.length > 1) {
+			do {
+				nextIndex = Math.floor(Math.random() * queue.length);
+			} while (nextIndex === currentIndex);
+		} else {
+			const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+			nextIndex = (baseIndex + direction + queue.length) % queue.length;
+		}
+
+		loadMetingSong(queue[nextIndex], queue);
+	};
+
 	// Fullscreen state sync
 	useEffect(() => {
 		const syncFullscreenState = () => {
@@ -529,11 +564,11 @@ export function UI({
 	// Audio ended handler
 	useEffect(() => {
 		const handleEnded = () => {
-			if (playQueue.length > 1) playFromQueue(1);
+			if (playQueue.length > 1) playFromQueueRef.current(1);
 		};
 		engine.audioElement.addEventListener("ended", handleEnded);
 		return () => engine.audioElement.removeEventListener("ended", handleEnded);
-	}, [playQueue, playFromQueue]);
+	}, [playQueue]);
 
 	// Restore last played on mount
 	useEffect(() => {
@@ -553,7 +588,7 @@ export function UI({
 			engine.init();
 			engine.loadUrl(song.url);
 		}
-	}, [setCurrentSong]);
+	}, []);
 
 	// Keyboard shortcut handler
 	const latestRefs = useRef({
@@ -561,7 +596,10 @@ export function UI({
 		playFromQueue: (_d: number) => {},
 	});
 	useEffect(() => {
-		latestRefs.current = { displaySettings, playFromQueue };
+		latestRefs.current = {
+			displaySettings,
+			playFromQueue: playFromQueueRef.current,
+		};
 	});
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
@@ -663,7 +701,7 @@ export function UI({
 
 		if (urls.length === 0) {
 			setSearchStatus("无可播放链接");
-			playFromQueue(1, songIdentity(song));
+			playFromQueueRef.current(1, songIdentity(song));
 			return;
 		}
 
@@ -675,7 +713,7 @@ export function UI({
 		const idx = currentUrlIndexRef.current;
 		const url = currentTrackUrlsRef.current[idx];
 		if (!url) {
-			playFromQueue(1, currentSongId ?? undefined);
+			playFromQueueRef.current(1, currentSongId ?? undefined);
 			return;
 		}
 		engine.init();
@@ -697,41 +735,13 @@ export function UI({
 			} else {
 				setSearchStatus("播放失败，即将跳过");
 				errorSkipTimeoutRef.current = setTimeout(() => {
-					playFromQueue(1, currentSongId ?? undefined);
+					playFromQueueRef.current(1, currentSongId ?? undefined);
 				}, 2000);
 			}
 		};
 		engine.audioElement.addEventListener("error", onError);
 		return () => engine.audioElement.removeEventListener("error", onError);
-	}, [currentSongId, tryPlayUrl, playFromQueue, loadVersionRef.value]);
-
-	const getCurrentQueue = (): MetingSong[] => {
-		const activePlaylist =
-			playlists.find((p) => p.id === activePlaylistId) || playlists[0];
-		if (playQueue.length > 0) return playQueue;
-		if (activePlaylist?.songs.length > 0) return activePlaylist.songs;
-		return metingPlaylist;
-	};
-
-	const playFromQueue = (direction: 1 | -1, fromSongId = currentSongId) => {
-		const queue = getCurrentQueue();
-		if (queue.length === 0) return;
-		let nextIndex = 0;
-		const currentIndex = queue.findIndex(
-			(song) => songIdentity(song) === fromSongId,
-		);
-
-		if (playMode === "shuffle" && queue.length > 1) {
-			do {
-				nextIndex = Math.floor(Math.random() * queue.length);
-			} while (nextIndex === currentIndex);
-		} else {
-			const baseIndex = currentIndex >= 0 ? currentIndex : 0;
-			nextIndex = (baseIndex + direction + queue.length) % queue.length;
-		}
-
-		loadMetingSong(queue[nextIndex], queue);
-	};
+	}, [currentSongId, loadVersionRef.value]);
 
 	const togglePlay = () => {
 		if (audioInputMode !== "player") {
@@ -989,7 +999,7 @@ export function UI({
 			window.removeEventListener("dragleave", handleDragLeaveGlobal);
 			window.removeEventListener("drop", handleDropGlobal);
 		};
-	}, [processFiles]);
+	}, []);
 
 	// ── Style computations ─────────────────────────────────────
 	const accentHex = `#${resolvedTheme.uRippleColor.getHexString()}`;
@@ -1027,11 +1037,11 @@ export function UI({
 		};
 		window.addEventListener("click", handleGlobalClick);
 		return () => window.removeEventListener("click", handleGlobalClick);
-	}, [closeFloatingPanels]);
+	}, []);
 
 	useEffect(() => {
 		if (isMobileSideNavOpen) markSideNavHintSeen();
-	}, [isMobileSideNavOpen, markSideNavHintSeen]);
+	}, [isMobileSideNavOpen]);
 
 	useEffect(() => {
 		writeSavedPlaylists(playlists);
@@ -2042,7 +2052,7 @@ export function UI({
 						<div className="flex items-center gap-2 max-[600px]:w-full max-[600px]:justify-between">
 							<div className="player-panel-controls shrink-0 flex items-center gap-2 max-[600px]:gap-1 text-white/60">
 								<button
-									onClick={() => playFromQueue(-1)}
+									onClick={() => playFromQueueRef.current(-1)}
 									className="hover:text-white min-h-[44px] min-w-[44px] flex items-center justify-center"
 									disabled={getCurrentQueue().length === 0}
 								>
@@ -2060,7 +2070,7 @@ export function UI({
 									)}
 								</button>
 								<button
-									onClick={() => playFromQueue(1)}
+									onClick={() => playFromQueueRef.current(1)}
 									className="hover:text-white min-h-[44px] min-w-[44px] flex items-center justify-center"
 									disabled={getCurrentQueue().length === 0}
 								>
