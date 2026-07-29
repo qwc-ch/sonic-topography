@@ -1,5 +1,5 @@
-import * as THREE from "three";
 import { shaderMaterial } from "@react-three/drei";
+import * as THREE from "three";
 
 const terrainFragmentShader = `
     uniform float uTime;
@@ -152,43 +152,43 @@ const terrainFragmentShader = `
 `;
 
 export const MapShaderMaterial = shaderMaterial(
-  {
-    uTime: 0,
-    uSubBass: 0,
-    uBass: 0,
-    uLowMid: 0,
-    uMid: 0,
-    uHighMid: 0,
-    uPresence: 0,
-    uBrilliance: 0,
-    uAir: 0,
-    uWarmth: 0,
-    uBrightness: 0,
-    uSharpness: 0,
-    uSmoothness: 0,
-    uDensity: 0,
-    uSpectralCentroid: 0,
-    uEnergy: 0,
-    uAmplitude: 1.0,
-    uRipples: new Array(10).fill({
-      pos: new THREE.Vector2(),
-      time: 0,
-      strength: 0,
-      isActive: 0,
-      rippleType: 0,
-    }),
-    uBaseColor1: new THREE.Color(0.01, 0.02, 0.04),
-    uBaseColor2: new THREE.Color(0.03, 0.05, 0.09),
-    uFogColor: new THREE.Color(0.01, 0.02, 0.04),
-    uCoolCore: new THREE.Color(0.0, 0.3, 1.0),
-    uCoolEdge: new THREE.Color(0.6, 0.2, 1.0),
-    uWarmCore: new THREE.Color(1.0, 0.2, 0.1),
-    uWarmEdge: new THREE.Color(1.0, 0.6, 0.0),
-    uRippleColor: new THREE.Color(0.2, 0.9, 1.0),
-    uGlowIntensity: 1.0,
-  },
-  // vertex shader
-  `
+	{
+		uTime: 0,
+		uSubBass: 0,
+		uBass: 0,
+		uLowMid: 0,
+		uMid: 0,
+		uHighMid: 0,
+		uPresence: 0,
+		uBrilliance: 0,
+		uAir: 0,
+		uWarmth: 0,
+		uBrightness: 0,
+		uSharpness: 0,
+		uSmoothness: 0,
+		uDensity: 0,
+		uSpectralCentroid: 0,
+		uEnergy: 0,
+		uAmplitude: 1.0,
+		uRipples: new Array(10).fill({
+			pos: new THREE.Vector2(),
+			time: 0,
+			strength: 0,
+			isActive: 0,
+			rippleType: 0,
+		}),
+		uBaseColor1: new THREE.Color(0.01, 0.02, 0.04),
+		uBaseColor2: new THREE.Color(0.03, 0.05, 0.09),
+		uFogColor: new THREE.Color(0.01, 0.02, 0.04),
+		uCoolCore: new THREE.Color(0.0, 0.3, 1.0),
+		uCoolEdge: new THREE.Color(0.6, 0.2, 1.0),
+		uWarmCore: new THREE.Color(1.0, 0.2, 0.1),
+		uWarmEdge: new THREE.Color(1.0, 0.6, 0.0),
+		uRippleColor: new THREE.Color(0.2, 0.9, 1.0),
+		uGlowIntensity: 1.0,
+	},
+	// vertex shader
+	`
     uniform float uTime;
     
     // Frequency envelopes
@@ -367,41 +367,41 @@ export const MapShaderMaterial = shaderMaterial(
       gl_Position = projectionMatrix * viewMatrix * worldPosition;
     }
   `,
-  terrainFragmentShader
+	terrainFragmentShader,
 );
 
 export const FloatingBlockShaderMaterial = shaderMaterial(
-  {
-    uTime: 0,
-    uPulse: 0,
-    uSubBass: 0,
-    uBass: 0,
-    uLowMid: 0,
-    uMid: 0,
-    uHighMid: 0,
-    uPresence: 0,
-    uBrilliance: 0,
-    uAir: 0,
-    uWarmth: 0,
-    uBrightness: 0,
-    uSharpness: 0,
-    uSmoothness: 0,
-    uDensity: 0,
-    uSpectralCentroid: 0,
-    uEnergy: 0,
-    uAmplitude: 1.0,
-    uBaseColor1: new THREE.Color(0.01, 0.02, 0.04),
-    uBaseColor2: new THREE.Color(0.03, 0.05, 0.09),
-    uFogColor: new THREE.Color(0.01, 0.02, 0.04),
-    uCoolCore: new THREE.Color(0.0, 0.3, 1.0),
-    uCoolEdge: new THREE.Color(0.6, 0.2, 1.0),
-    uWarmCore: new THREE.Color(1.0, 0.2, 0.1),
-    uWarmEdge: new THREE.Color(1.0, 0.6, 0.0),
-    uRippleColor: new THREE.Color(0.2, 0.9, 1.0),
-    uGlowIntensity: 1.0,
-  },
-  // vertex shader
-  `
+	{
+		uTime: 0,
+		uPulse: 0,
+		uSubBass: 0,
+		uBass: 0,
+		uLowMid: 0,
+		uMid: 0,
+		uHighMid: 0,
+		uPresence: 0,
+		uBrilliance: 0,
+		uAir: 0,
+		uWarmth: 0,
+		uBrightness: 0,
+		uSharpness: 0,
+		uSmoothness: 0,
+		uDensity: 0,
+		uSpectralCentroid: 0,
+		uEnergy: 0,
+		uAmplitude: 1.0,
+		uBaseColor1: new THREE.Color(0.01, 0.02, 0.04),
+		uBaseColor2: new THREE.Color(0.03, 0.05, 0.09),
+		uFogColor: new THREE.Color(0.01, 0.02, 0.04),
+		uCoolCore: new THREE.Color(0.0, 0.3, 1.0),
+		uCoolEdge: new THREE.Color(0.6, 0.2, 1.0),
+		uWarmCore: new THREE.Color(1.0, 0.2, 0.1),
+		uWarmEdge: new THREE.Color(1.0, 0.6, 0.0),
+		uRippleColor: new THREE.Color(0.2, 0.9, 1.0),
+		uGlowIntensity: 1.0,
+	},
+	// vertex shader
+	`
     uniform float uTime;
     uniform float uPulse;
 
@@ -433,8 +433,8 @@ export const FloatingBlockShaderMaterial = shaderMaterial(
       gl_Position = projectionMatrix * viewMatrix * worldPosition;
     }
   `,
-  // fragment shader
-  `
+	// fragment shader
+	`
     uniform float uTime;
     
     // High frequency & timbral uniforms for color
@@ -536,28 +536,28 @@ export const FloatingBlockShaderMaterial = shaderMaterial(
       
       gl_FragColor = vec4(finalColor, alphaFade);
     }
-  `
+  `,
 );
 
 export const CoverShaderMaterial = shaderMaterial(
-  {
-    uTexture: new THREE.Texture(),
-    uThemeColor: new THREE.Color(1.0, 1.0, 1.0),
-    uFogColor: new THREE.Color(0.0, 0.0, 0.0),
-    uTextureSize: new THREE.Vector2(512.0, 512.0),
-    uTime: 0.0,
-    uPulse: 0.0,
-  },
-  // vertex shader
-  `
+	{
+		uTexture: new THREE.Texture(),
+		uThemeColor: new THREE.Color(1.0, 1.0, 1.0),
+		uFogColor: new THREE.Color(0.0, 0.0, 0.0),
+		uTextureSize: new THREE.Vector2(512.0, 512.0),
+		uTime: 0.0,
+		uPulse: 0.0,
+	},
+	// vertex shader
+	`
     varying vec2 vUv;
     void main() {
       vUv = uv;
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
   `,
-  // fragment shader
-  `
+	// fragment shader
+	`
     uniform sampler2D uTexture;
     uniform vec3 uThemeColor;
     uniform vec3 uFogColor;
@@ -637,5 +637,5 @@ export const CoverShaderMaterial = shaderMaterial(
       
       gl_FragColor = vec4(finalColor, finalAlpha); 
     }
-  `
+  `,
 );

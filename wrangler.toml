@@ -1,0 +1,8 @@
+name = "sonic-topography"
+compatibility_date = "2026-07-29" # 更为今日
+
+[assets]
+directory = "./dist"
+
+[vars]
+NODE_VERSION = "24"

@@ -1,134 +1,145 @@
-import { createNeteaseCookieHeaders } from './neteaseCookie';
-import { createQQCookieHeaders } from './qqCookie';
-import type { CloudPlaylistSummary, MusicProvider, NeteaseSong, SavedPlaylist } from '../types';
+// 简化的音乐 API：全部基于 Meting API（不再依赖本地代理服务）
+// 保留旧导出函数名以减少 UI 改动；其行为改为直接调用 Meting API
+
+import type {
+	CloudPlaylistSummary,
+	MusicProvider,
+	SavedPlaylist,
+} from "../types";
 import {
-  buildNeteasePlaybackUrl,
-  buildQQPlaybackUrl,
-  type PlaybackQualitySettings,
-} from './playbackQuality';
+	fetchMetingPlaylist,
+	fetchMetingSongUrl,
+	loadMetingLyrics,
+	type MetingSong,
+	searchMetingSongs,
+} from "./metingApi";
+import { metingConfig } from "./metingConfig";
+
+export type { MetingSong } from "./metingApi";
+export type { MetingServer, MetingType } from "./metingConfig";
 
 export interface ApiResponse<T> {
-  ok: boolean;
-  status: number;
-  data: T;
+	ok: boolean;
+	status: number;
+	data: T;
 }
 
 export interface SongListPayload {
-  songs?: NeteaseSong[];
-  playlists?: CloudPlaylistSummary[];
-  status?: string;
-  fallback?: boolean;
-  rawCount?: number;
-  loadedCount?: number;
-  totalCount?: number;
-  rawTrackCount?: number;
-  playlist?: { trackCount?: number };
-  error?: string;
+	songs?: MetingSong[];
+	playlists?: CloudPlaylistSummary[];
+	status?: string;
+	fallback?: boolean;
+	rawCount?: number;
+	loadedCount?: number;
+	totalCount?: number;
+	error?: string;
 }
 
-async function requestJson<T>(url: string, init?: RequestInit): Promise<ApiResponse<T>> {
-  const response = await fetch(url, init);
-  return {
-    ok: response.ok,
-    status: response.status,
-    data: await response.json() as T,
-  };
+// 旧：本地服务器歌单存储；现：仅 localStorage
+export function loadServerPlaylists(): Promise<
+	ApiResponse<{ playlists?: SavedPlaylist[] }>
+> {
+	return Promise.resolve({ ok: true, status: 200, data: { playlists: [] } });
 }
 
-export function providerCookieHeaders(provider: MusicProvider, cookie: string) {
-  return provider === 'qq' ? createQQCookieHeaders(cookie) : createNeteaseCookieHeaders(cookie);
+export function saveServerPlaylists(
+	_playlists: SavedPlaylist[],
+): Promise<ApiResponse<{ playlists?: SavedPlaylist[] }>> {
+	return Promise.resolve({ ok: true, status: 200, data: { playlists: [] } });
 }
 
-export function syncNeteaseProxyCookie(cookie: string) {
-  return requestJson<{ valid?: boolean }>('/api/netease/cookie', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cookie }),
-  });
+// 加载默认 Meting 播放列表
+export async function loadDefaultPlaylist(): Promise<MetingSong[]> {
+	return fetchMetingPlaylist(
+		metingConfig.meting.server,
+		metingConfig.meting.type,
+		metingConfig.meting.id,
+	);
 }
 
-export function syncQQProxyCookie(cookie: string) {
-  return requestJson<{ loggedIn?: boolean }>('/api/qq/login/cookie', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cookie }),
-  });
+// 搜索（兼容旧接口 searchCloudMusic）
+export async function searchCloudMusic(
+	_provider: MusicProvider,
+	keywords: string,
+	_cookie: string,
+): Promise<ApiResponse<SongListPayload>> {
+	try {
+		const songs = await searchMetingSongs(
+			keywords,
+			metingConfig.searchServer,
+			30,
+		);
+		return { ok: true, status: 200, data: { songs, rawCount: songs.length } };
+	} catch (error) {
+		return { ok: false, status: 500, data: { error: String(error) } };
+	}
 }
 
-export async function logoutQQProxy() {
-  await fetch('/api/qq/logout');
+// 旧：加载云歌单内容；现：通过 Meting 加载指定歌单 ID
+export async function loadCloudPayload<T = SongListPayload>(
+	_url: string,
+	_provider: MusicProvider,
+	_cookie: string,
+): Promise<ApiResponse<T>> {
+	try {
+		const songs = await fetchMetingPlaylist();
+		return { ok: true, status: 200, data: { songs } as unknown as T };
+	} catch (error) {
+		return {
+			ok: false,
+			status: 500,
+			data: { error: String(error) } as unknown as T,
+		};
+	}
 }
 
-export function loadServerPlaylists() {
-  return requestJson<{ playlists?: SavedPlaylist[] }>('/api/playlists');
-}
-
-export function saveServerPlaylists(playlists: SavedPlaylist[]) {
-  return requestJson<{ playlists?: SavedPlaylist[] }>('/api/playlists', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ playlists }),
-  });
-}
-
-export function loadCloudPayload<T = SongListPayload>(url: string, provider: MusicProvider, cookie: string) {
-  return requestJson<T>(url, { headers: providerCookieHeaders(provider, cookie) });
-}
-
-export function buildMusicSearchUrl(provider: MusicProvider, keywords: string, hasCookie: boolean) {
-  const encoded = encodeURIComponent(keywords);
-  if (provider === 'qq') return `/api/qq/search?keywords=${encoded}&limit=30`;
-  return `/api/netease/search?keywords=${encoded}${hasCookie ? '&limit=30' : ''}`;
-}
-
-export function searchCloudMusic(provider: MusicProvider, keywords: string, cookie: string) {
-  return loadCloudPayload(
-    buildMusicSearchUrl(provider, keywords, Boolean(cookie)),
-    provider,
-    cookie,
-  );
-}
-
-export function loadSongLyrics(song: NeteaseSong, neteaseCookie: string, qqCookie: string) {
-  const provider = song.provider || 'netease';
-  if (provider === 'qq') {
-    const mid = song.mid || song.songmid || String(song.id);
-    return loadCloudPayload<{ lyric?: string; translatedLyric?: string; tlyric?: string; qrc?: string }>(
-      `/api/qq/lyric?mid=${encodeURIComponent(mid)}&id=${encodeURIComponent(String(song.qqId || ''))}`,
-      provider,
-      qqCookie,
-    );
-  }
-  return loadCloudPayload<{ lyric?: string; translatedLyric?: string; tlyric?: string; qrc?: string }>(
-    `/api/netease/lyric?id=${encodeURIComponent(String(song.id))}`,
-    provider,
-    neteaseCookie,
-  );
-}
-
+// 旧：根据 URL 加载歌曲；现：通过 Meting 获取单曲 URL 列表
 export async function loadSongPlaybackResources(
-  song: NeteaseSong,
-  settings: PlaybackQualitySettings,
-  neteaseCookie: string,
-  qqCookie: string,
+	song: MetingSong,
+): Promise<{ urls: string[]; lyric: string }> {
+	const [urls, lyric] = await Promise.all([
+		fetchMetingSongUrl(song),
+		loadMetingLyrics(song),
+	]);
+	return { urls, lyric };
+}
+
+// 旧：加载歌词；现：通过 Meting 获取歌词文本
+export async function loadSongLyrics(
+	song: MetingSong,
+): Promise<{ lyric: string }> {
+	const lyric = await loadMetingLyrics(song);
+	return { lyric };
+}
+
+// 兼容旧导出
+export function buildMusicSearchUrl(
+	_provider: MusicProvider,
+	keywords: string,
+	_hasCookie: boolean,
 ) {
-  const provider = song.provider || 'netease';
-  if (provider === 'qq') {
-    const mid = song.mid || song.songmid || String(song.id);
-    const qqSong = { mid, mediaMid: song.mediaMid || '' };
-    const [playback, lyrics] = await Promise.all([
-      loadCloudPayload<{ url?: string; message?: string }>(
-        buildQQPlaybackUrl('/api/qq/song/url', qqSong, settings), provider, qqCookie,
-      ),
-      loadSongLyrics(song, neteaseCookie, qqCookie),
-    ]);
-    return { provider, qqSong, urlData: playback.data, lyricData: lyrics.data };
-  }
-  const [playback, lyrics] = await Promise.all([
-    loadCloudPayload<{ url?: string; message?: string }>(
-      buildNeteasePlaybackUrl('/api/netease/url', song.id, settings), provider, neteaseCookie,
-    ),
-    loadSongLyrics(song, neteaseCookie, qqCookie),
-  ]);
-  return { provider, urlData: playback.data, lyricData: lyrics.data };
+	return `/search?q=${encodeURIComponent(keywords)}`;
+}
+
+export async function logoutQQProxy(): Promise<void> {
+	// no-op
+}
+
+export function syncNeteaseProxyCookie(
+	_cookie: string,
+): Promise<ApiResponse<{ valid?: boolean }>> {
+	return Promise.resolve({ ok: true, status: 200, data: { valid: false } });
+}
+
+export function syncQQProxyCookie(
+	_cookie: string,
+): Promise<ApiResponse<{ loggedIn?: boolean }>> {
+	return Promise.resolve({ ok: true, status: 200, data: { loggedIn: false } });
+}
+
+export function providerCookieHeaders(
+	_provider: MusicProvider,
+	_cookie: string,
+) {
+	return {};
 }
