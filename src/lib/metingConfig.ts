@@ -45,7 +45,7 @@ export const metingConfig: MetingConfig = {
 	showLyrics: true,
 	searchServer: "netease",
 	meting: {
-		api: "https://meting.mikus.ink/meting/api?server=:server&type=:type&id=:id&r=:r",
+		api: "https://api.qijieya.cn/meting/?server=:server&type=:type&id=:id&r=:r",
 		server: "netease",
 		type: "playlist",
 		id: "17426009449",
