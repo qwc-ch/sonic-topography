@@ -4,14 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sonic Topography</title>
-    <script>
-      // 无哈希时重定向到 /#/ 开头的哈希路由，静态部署下刷新不会 404
-      if (!window.location.hash) {
-        window.location.replace(
-          window.location.pathname + window.location.search + "#/",
-        );
-      }
-    </script>
   </head>
   <body>
     <div id="root"></div>
