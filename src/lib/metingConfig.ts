@@ -8,7 +8,8 @@ export type MetingType =
 	| "album"
 	| "search"
 	| "artist"
-	| "url";
+	| "url"
+	| "lrc";
 
 export interface MetingApiConfig {
 	// Meting API 地址模板，占位符 :server/:type/:id/:r 会被替换
@@ -65,6 +66,26 @@ export const METING_SERVERS: Array<{ value: MetingServer; label: string }> = [
 	{ value: "xiami", label: "虾米" },
 	{ value: "baidu", label: "百度" },
 ];
+
+const PLAYLIST_ID_KEY = "sonic-meting-playlist-id";
+
+/** 读取当前默认歌单 ID（优先 localStorage 覆盖值，否则用配置默认值） */
+export function getMetingPlaylistId(): string {
+	try {
+		const saved = window.localStorage.getItem(PLAYLIST_ID_KEY);
+		if (saved) return saved;
+	} catch {}
+	return metingConfig.meting.id;
+}
+
+/** 覆盖默认歌单 ID（持久化到 localStorage）；空值恢复配置默认 */
+export function setMetingPlaylistId(id: string) {
+	try {
+		const trimmed = id.trim();
+		if (trimmed) window.localStorage.setItem(PLAYLIST_ID_KEY, trimmed);
+		else window.localStorage.removeItem(PLAYLIST_ID_KEY);
+	} catch {}
+}
 
 export function buildMetingUrl(
 	template: string,

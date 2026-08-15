@@ -13,7 +13,7 @@ import {
 	type MetingSong,
 	searchMetingSongs,
 } from "./metingApi";
-import { metingConfig } from "./metingConfig";
+import { getMetingPlaylistId, metingConfig } from "./metingConfig";
 
 export type { MetingSong } from "./metingApi";
 export type { MetingServer, MetingType } from "./metingConfig";
@@ -53,7 +53,7 @@ export async function loadDefaultPlaylist(): Promise<MetingSong[]> {
 	return fetchMetingPlaylist(
 		metingConfig.meting.server,
 		metingConfig.meting.type,
-		metingConfig.meting.id,
+		getMetingPlaylistId(),
 	);
 }
 

@@ -150,71 +150,6 @@ canvas {
 	background: transparent;
 }
 
-.side-nav-trigger {
-	width: 28px;
-}
-
-.side-nav-trigger.is-mobile-open {
-	width: min(78vw, 220px);
-}
-
-@media (hover: hover) and (pointer: fine) {
-	.side-nav-trigger:hover {
-		width: min(78vw, 220px);
-	}
-
-	.side-nav-trigger:hover .side-nav-panel {
-		transform: translateX(0);
-	}
-}
-
-.side-nav-trigger-right {
-	width: 28px;
-}
-
-.side-nav-trigger-right.is-mobile-open-right {
-	width: min(90vw, 540px);
-}
-
-@media (hover: hover) and (pointer: fine) {
-	.side-nav-trigger-right:hover {
-		width: min(90vw, 540px);
-	}
-
-	.side-nav-trigger-right:hover .side-nav-panel-right {
-		transform: translateX(0);
-	}
-}
-
-.side-nav-panel {
-	align-items: stretch;
-	padding: 24px 12px;
-	width: min(78vw, 220px);
-}
-
-.side-nav-panel button {
-	color: var(--sonic-side-nav-text, rgba(255, 255, 255, 0.72));
-	font-size: 13px;
-	justify-content: flex-start;
-	letter-spacing: 0.14em;
-	margin-bottom: 14px;
-	min-height: 44px;
-	padding: 0 12px;
-	text-align: left;
-	white-space: nowrap;
-	width: 100%;
-	writing-mode: horizontal-tb;
-}
-
-.side-nav-panel button:hover {
-	color: var(--sonic-side-nav-active, rgba(255, 255, 255, 0.94));
-}
-
-.side-nav-panel .side-nav-bottom {
-	gap: 12px;
-	width: 100%;
-}
-
 .mobile-hide-aux-ui {
 	display: block;
 }
@@ -351,14 +286,5 @@ canvas {
 
 	.mobile-hide-aux-ui {
 		display: none;
-	}
-
-	.side-nav-panel {
-		padding: 20px 10px;
-	}
-
-	.side-nav-panel button {
-		font-size: 14px;
-		min-height: 46px;
 	}
 }

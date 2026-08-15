@@ -1,8 +1,10 @@
 import {
 	ListMusic,
+	Maximize,
 	Menu,
 	Mic,
 	Music,
+	Orbit,
 	Palette,
 	Pause,
 	Play,
@@ -16,6 +18,7 @@ import {
 	SkipForward,
 	Trash2,
 	Volume2,
+	X,
 } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -31,6 +34,13 @@ import {
 	readLastPlayedStorage,
 	writeLastPlayedStorage,
 } from "../../lib/lastPlayedStorage";
+import { createLocalSongs, isLocalSong } from "../../lib/localSong";
+import {
+	enrichFolderSong,
+	type FolderSongEnrichment,
+	loadMusicFolderCover,
+	loadMusicFolderSongs,
+} from "../../lib/musicFolder";
 import {
 	DEFAULT_MAX_CHARS_PER_LINE,
 	DEFAULT_SPATIAL_ORBIT_OFFSET,
@@ -39,14 +49,17 @@ import {
 import { extractAudioMetadata } from "../../lib/metadata";
 import {
 	fetchMetingPlaylist,
+	fetchMetingSongMeta,
 	fetchMetingSongUrl,
 	loadMetingLyrics,
 	searchMetingSongs,
 } from "../../lib/metingApi";
 import {
+	getMetingPlaylistId,
 	METING_SERVERS,
 	type MetingServer,
 	metingConfig,
+	setMetingPlaylistId,
 } from "../../lib/metingConfig";
 import {
 	isRepeatOneMode,
@@ -128,6 +141,7 @@ function songIdentity(song: Pick<MetingSong, "id">) {
 
 function songSourceLabel(song: MetingSong | null) {
 	if (!song) return "本地音频";
+	if (isLocalSong(song)) return "本地音频";
 	return "Meting 在线";
 }
 
@@ -172,6 +186,32 @@ function CoverArt({
 		<div className={`${baseClass} grid place-items-center text-white/35`}>
 			<ListMusic size={iconSize} />
 		</div>
+	);
+}
+
+function NavButton({
+	icon,
+	label,
+	active = false,
+	accentHex,
+	onClick,
+}: {
+	icon: React.ReactNode;
+	label: string;
+	active?: boolean;
+	accentHex: string;
+	onClick: () => void;
+}) {
+	const _lang = useLanguage();
+	return (
+		<button
+			onClick={onClick}
+			className={`flex items-center gap-2.5 rounded-sm border px-3 py-2.5 text-left text-[12px] transition-colors ${active ? "" : "border-white/10 text-white/70 hover:bg-white/5 hover:text-white"}`}
+			style={active ? activeControlStyle(accentHex) : undefined}
+		>
+			<span className="shrink-0 text-white/50">{icon}</span>
+			<span className="truncate">{label}</span>
+		</button>
 	);
 }
 
@@ -356,8 +396,8 @@ export function UI({
 			spatialOrbitOffset: DEFAULT_SPATIAL_ORBIT_OFFSET,
 		};
 	const fileInputRef = useRef<HTMLInputElement>(null);
-	const demoAudioUrl = `${baseUrl}demo.mp3`;
-	const demoLyricsUrl = `${baseUrl}demo.lrc`;
+	const demoAudioUrl = `${baseUrl}music/demo.mp3`;
+	const demoLyricsUrl = `${baseUrl}music/demo.lrc`;
 	const [isPlaying, setIsPlaying] = useState(false);
 	const [trackName, setTrackName] = useState<string>("加载中...");
 	const [lyricsText, setLyricsText] = useState<string>("");
@@ -392,7 +432,6 @@ export function UI({
 	const [searchServer, setSearchServer] = useState<MetingServer>(
 		metingConfig.searchServer,
 	);
-	const [showPlaylistPanel, setShowPlaylistPanel] = useState(false);
 	const [playlists, setPlaylists] =
 		useState<SavedPlaylist[]>(readSavedPlaylists);
 	const [activePlaylistId, setActivePlaylistId] = useState("favorites");
@@ -412,12 +451,19 @@ export function UI({
 	);
 	const [_presetTransferStatus, setPresetTransferStatus] = useState("");
 	const [isMobileSideNavOpen, setIsMobileSideNavOpen] = useState(false);
+	const [playlistIdPanelOpen, setPlaylistIdPanelOpen] = useState(false);
+	const [playlistIdInput, setPlaylistIdInput] = useState(
+		getMetingPlaylistId(),
+	);
 	const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
 	const [hasSeenSideNavHint, setHasSeenSideNavHint] =
 		useState(readSideNavHintSeen);
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [metingPlaylist, setMetingPlaylist] = useState<MetingSong[]>([]);
 	const [_metingStatus, setMetingStatus] = useState("正在加载 Meting 歌单...");
+	const [localPlaylist, setLocalPlaylist] = useState<MetingSong[]>([]);
+	const [folderPlaylist, setFolderPlaylist] = useState<MetingSong[]>([]);
+	const [folderCover, setFolderCover] = useState("");
 
 	const setCurrentSong = (song: MetingSong | null) => {
 		setCurrentSongState(song);
@@ -482,6 +528,16 @@ export function UI({
 			.catch(() => {
 				setMetingStatus("Meting API 加载失败");
 			});
+	}, []);
+
+	// Load local music folder on mount
+	useEffect(() => {
+		loadMusicFolderSongs()
+			.then((songs) => setFolderPlaylist(songs))
+			.catch(() => {});
+		loadMusicFolderCover()
+			.then(setFolderCover)
+			.catch(() => {});
 	}, []);
 
 	// Poll audio state
@@ -580,6 +636,12 @@ export function UI({
 		setCurrentSongId(songIdentity(song));
 		setTrackName(last.trackName);
 		setCurrentCover(last.cover || song.cover || "");
+		// 上传文件的 blob URL 无法跨会话恢复，只恢复显示信息；
+		// 目录音乐（provider: "local" 但 url 为静态路径）可正常恢复
+		if (isLocalSong(song) && song.url.startsWith("blob:")) {
+			setLyricsText(song.lrc || "");
+			return;
+		}
 		if (song.lrc)
 			loadMetingLyrics(song)
 				.then(setLyricsText)
@@ -682,6 +744,61 @@ export function UI({
 			cover: song.cover || "",
 			queue: queue || playQueue,
 		});
+
+		// 本地文件：直接使用 object URL，歌词优先级 侧边 .lrc → 内嵌 → 在线匹配；
+		// 显示名称固定用文件名解析结果
+		if (isLocalSong(song)) {
+			currentTrackUrlsRef.current = [song.url];
+			currentUrlIndexRef.current = 0;
+			setSearchStatus("");
+			setShowSearchPanel(false);
+			engine.init();
+			engine.loadUrl(song.url);
+			engine.play();
+
+			const resolveMeta = async () => {
+				if (song.lrc) {
+					const lrc = await loadMetingLyrics(song).catch(() => "");
+					if (loadVersionRef.value === ver && lrc) setLyricsText(lrc);
+					return;
+				}
+				const enriched = !song.cover
+					? await enrichFolderSong(song).catch(
+							(): FolderSongEnrichment => ({}),
+						)
+					: {};
+				let cover = enriched.cover || song.cover || "";
+				let lyrics = enriched.lyrics || "";
+				// 内嵌信息缺失（如无封面或无歌词）时在线匹配
+				if (!cover || !lyrics) {
+					const online = await fetchMetingSongMeta(
+						song.name,
+						song.artist,
+					).catch(
+						(): { cover: string; lrc: string } => ({
+							cover: "",
+							lrc: "",
+						}),
+					);
+					if (!cover) cover = online.cover;
+					if (!lyrics) lyrics = online.lrc;
+				}
+				if (loadVersionRef.value !== ver) return;
+				if (cover) {
+					setCurrentCover(cover);
+					setFolderPlaylist((list) =>
+						list.map((entry) =>
+							entry.id === song.id
+								? { ...entry, cover: entry.cover || cover }
+								: entry,
+						),
+					);
+				}
+				if (lyrics) setLyricsText(lyrics);
+			};
+			resolveMeta();
+			return;
+		}
 
 		// Load lyrics
 		loadMetingLyrics(song)
@@ -856,8 +973,8 @@ export function UI({
 	// File upload
 	const processFiles = async (files: FileList | null) => {
 		if (!files || files.length === 0) return;
-		let audioFile: File | null = null;
-		let lrcFile: File | null = null;
+		const audioFiles: File[] = [];
+		const lrcByBaseName = new Map<string, string>();
 		for (let i = 0; i < files.length; i++) {
 			const file = files[i];
 			if (
@@ -866,38 +983,30 @@ export function UI({
 				file.name.endsWith(".wav") ||
 				file.name.endsWith(".flac")
 			) {
-				audioFile = file;
-			} else if (file.name.endsWith(".lrc")) {
-				lrcFile = file;
+				audioFiles.push(file);
+			} else if (file.name.toLowerCase().endsWith(".lrc")) {
+				const key = file.name.replace(/\.[^.]+$/, "").toLowerCase();
+				const text = await file.text();
+				lrcByBaseName.set(key, text);
 			}
 		}
-		if (audioFile) {
-			setAudioInputMode("player");
-			setAudioInputStatus("");
-			setLyricsText("");
-			const metadata = await extractAudioMetadata(audioFile, audioFile.name);
-			if (metadata.lyrics) setLyricsText(metadata.lyrics);
-			setTrackName(metadata.displayName);
-			setCurrentSong(null);
-			setCurrentSongId(null);
-			setCurrentCover(metadata.cover || "");
-		} else {
-			setLyricsText("");
-			setCurrentCover("");
-		}
-		if (lrcFile) {
-			const reader = new FileReader();
-			reader.onload = (e) => {
-				const text = e.target?.result as string;
-				setLyricsText(text);
-			};
-			reader.readAsText(lrcFile);
-		}
-		if (audioFile) {
-			engine.init();
-			engine.loadFile(audioFile);
-			engine.play();
-		}
+		if (audioFiles.length === 0) return;
+		setAudioInputMode("player");
+		setAudioInputStatus("");
+		const newSongs = await createLocalSongs(audioFiles, { lrcByBaseName });
+		if (newSongs.length === 0) return;
+		const existingKeys = new Set(
+			localPlaylist.map((song) => `${song.name}::${song.artist}`),
+		);
+		const freshSongs = newSongs.filter(
+			(song) => !existingKeys.has(`${song.name}::${song.artist}`),
+		);
+		if (freshSongs.length === 0) return;
+		const next = [...localPlaylist, ...freshSongs];
+		setLocalPlaylist(next);
+		setPlayQueue(next);
+		setActivePlaylistId("local");
+		loadMetingSong(freshSongs[0], next);
 	};
 
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -943,19 +1052,45 @@ export function UI({
 		setShowOptionsPanel(false);
 		setShowAudioInputPanel(false);
 		setShowSearchPanel(false);
-		setShowPlaylistPanel(false);
 		setIsMobileSideNavOpen(false);
 		setIsRightSidebarOpen(false);
+	};
+
+	// 重新加载当前默认歌单
+	const reloadMetingPlaylist = async () => {
+		setMetingStatus("正在加载 Meting 歌单...");
+		try {
+			const songs = await fetchMetingPlaylist();
+			setMetingPlaylist(songs);
+			setMetingStatus(
+				songs.length > 0 ? `已加载 ${songs.length} 首曲目` : "Meting 歌单为空",
+			);
+			setActivePlaylistId("");
+			setPlayQueue(songs);
+		} catch {
+			setMetingStatus("Meting API 加载失败");
+		}
+	};
+
+	// 应用默认歌单 ID 并重新加载
+	const applyPlaylistId = async () => {
+		setMetingPlaylistId(playlistIdInput.trim());
+		setPlaylistIdPanelOpen(false);
+		await reloadMetingPlaylist();
+	};
+
+	// 恢复配置中的默认歌单 ID 并重新加载
+	const resetPlaylistId = async () => {
+		setMetingPlaylistId("");
+		setPlaylistIdInput(metingConfig.meting.id);
+		setPlaylistIdPanelOpen(false);
+		await reloadMetingPlaylist();
 	};
 
 	const markSideNavHintSeen = () => {
 		if (hasSeenSideNavHint) return;
 		writeSideNavHintSeen();
 		setHasSeenSideNavHint(true);
-	};
-	const openMobileSideNav = () => {
-		markSideNavHintSeen();
-		setIsMobileSideNavOpen(true);
 	};
 
 	const toggleFullscreen = async () => {
@@ -1193,227 +1328,174 @@ export function UI({
 					</div>
 				)}
 
-				{/* Sidebar Left */}
+				{/* 功能菜单 Card */}
+				{isMobileSideNavOpen && (
+					<div
+						className="fixed inset-0 z-[64] bg-black/30"
+						onClick={() => setIsMobileSideNavOpen(false)}
+					/>
+				)}
 				<div
-					className={`side-nav-trigger absolute left-0 top-0 h-full z-[60] transition-all pointer-events-auto ${isMobileSideNavOpen ? "is-mobile-open" : ""}`}
-					onMouseEnter={(e) => {
-						if (e.buttons !== 0) return;
-						if (Date.now() - lastPointerUpTime.current < 100) return;
-						openMobileSideNav();
-					}}
-					onMouseLeave={() => setIsMobileSideNavOpen(false)}
-					onClick={() => {
-						if (window.innerWidth < 640) setIsMobileSideNavOpen(false);
-					}}
+					className={`absolute top-[56px] left-3 z-[70] w-[min(272px,calc(100vw-24px))] pointer-events-auto backdrop-blur-[20px] border rounded-sm overflow-hidden transition-all duration-200 ${isMobileSideNavOpen ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2 pointer-events-none"}`}
+					style={themedPanelStyle(accentHex, 0.9)}
 				>
-					{isMobileSideNavOpen && window.innerWidth < 640 && (
-						<button
-							className="absolute inset-0 bg-black/60 z-0"
-							onClick={() => setIsMobileSideNavOpen(false)}
-						/>
-					)}
-					<aside
-						className={`side-nav-panel absolute left-0 top-0 h-full border-r flex flex-col pointer-events-auto z-10 ${isMobileSideNavOpen ? "translate-x-0" : "-translate-x-full"} transition-transform duration-300`}
-						style={{
-							...themedPanelStyle(accentHex, isLightSurface ? 0.82 : 0.7),
-							borderRightColor: colorWithAlpha(
-								accentHex,
-								isLightSurface ? 0.26 : 0.18,
-							),
-						}}
+					<div
+						className="flex items-center justify-between p-4 border-b"
+						style={{ borderColor: colorWithAlpha(accentHex, 0.18) }}
 					>
+						<div className="text-[12px] uppercase tracking-[0.2em] text-white/70">
+							功能菜单
+						</div>
 						<button
-							onClick={closeFloatingPanels}
-							className="uppercase tracking-[0.2em] text-[10px] mb-12 opacity-100 transition-opacity cursor-pointer"
-							style={{ writingMode: "vertical-rl", color: sideNavActiveColor }}
+							onClick={() => setIsMobileSideNavOpen(false)}
+							className="text-white/40 hover:text-white transition-colors"
+							aria-label="关闭菜单"
 						>
-							可视化
+							<X size={15} />
 						</button>
-						<button
-							onClick={() => {
-								setShowOptionsPanel(true);
-								setIsMobileSideNavOpen(false);
-							}}
-							className="uppercase tracking-[0.2em] text-[10px] mb-12 opacity-40 hover:opacity-100 transition-opacity cursor-pointer"
-							style={{ writingMode: "vertical-rl" }}
-						>
-							设置
-						</button>
-						<button
-							onClick={() => {
-								setShowSearchPanel(true);
-								setIsMobileSideNavOpen(false);
-							}}
-							className="uppercase tracking-[0.2em] text-[10px] mb-12 opacity-40 hover:opacity-100 transition-opacity cursor-pointer"
-							style={{ writingMode: "vertical-rl" }}
-						>
-							搜索
-						</button>
-						<button
-							onClick={() => {
-								setShowPlaylistPanel(true);
-								setIsMobileSideNavOpen(false);
-							}}
-							className="uppercase tracking-[0.2em] text-[10px] mb-12 opacity-40 hover:opacity-100 transition-opacity cursor-pointer"
-							style={{ writingMode: "vertical-rl" }}
-						>
-							歌单
-						</button>
-						<button
-							onClick={() => {
-								setShowAudioInputPanel(true);
-								setIsMobileSideNavOpen(false);
-							}}
-							className="uppercase tracking-[0.2em] text-[10px] mb-12 opacity-40 hover:opacity-100 transition-opacity cursor-pointer"
-							style={{ writingMode: "vertical-rl" }}
-						>
-							输入
-						</button>
-
-						<div className="side-nav-bottom mt-auto flex flex-col items-center gap-10">
-							<button
+					</div>
+					<div className="p-3">
+						<div className="mb-2 px-1 text-[9px] uppercase tracking-[0.2em] text-white/35">
+							功能
+						</div>
+						<div className="grid grid-cols-2 gap-2">
+							<NavButton
+								icon={<ListMusic size={14} />}
+								label="歌单"
+								accentHex={accentHex}
 								onClick={() => {
-									loadDemo();
 									setIsMobileSideNavOpen(false);
+									setPlaylistIdInput(getMetingPlaylistId());
+									setPlaylistIdPanelOpen(true);
 								}}
-								className="uppercase tracking-[0.2em] text-[10px] opacity-40 hover:opacity-100 transition-opacity cursor-pointer font-bold"
-								style={{ writingMode: "vertical-rl" }}
-							>
-								示例
-							</button>
-							<button
-								onClick={() => {
-									fileInputRef.current?.click();
-									setIsMobileSideNavOpen(false);
-								}}
-								className="uppercase tracking-[0.2em] text-[10px] opacity-40 hover:opacity-100 transition-opacity cursor-pointer"
-								style={{ writingMode: "vertical-rl" }}
-							>
-								上传
-							</button>
-							<button
+							/>
+							<NavButton
+								icon={<Orbit size={14} />}
+								label="视角"
+								accentHex={accentHex}
+								active={isPerspectiveEditMode}
 								onClick={() => {
 									onPerspectiveEditModeChange?.(true);
 									setIsMobileSideNavOpen(false);
 								}}
-								className={`uppercase tracking-[0.2em] text-[10px] transition-opacity cursor-pointer ${isPerspectiveEditMode ? "opacity-100" : "opacity-40 hover:opacity-100"}`}
-								style={{ writingMode: "vertical-rl" }}
-							>
-								视角
-							</button>
-							<button
+							/>
+							<NavButton
+								icon={<Maximize size={14} />}
+								label={isFullscreen ? "退出全屏" : "全屏"}
+								accentHex={accentHex}
+								active={isFullscreen}
 								onClick={toggleFullscreen}
-								className={`uppercase tracking-[0.2em] text-[10px] transition-opacity cursor-pointer ${isFullscreen ? "opacity-100" : "opacity-40 hover:opacity-100"}`}
-								style={{ writingMode: "vertical-rl" }}
-							>
-								{isFullscreen ? "退出" : "全屏"}
-							</button>
-							<button
-								onClick={() => setLanguage(lang === "zh" ? "en" : "zh")}
-								className="uppercase tracking-[0.2em] text-[10px] opacity-40 hover:opacity-100 transition-opacity cursor-pointer mt-4 font-bold"
-								style={{
-									writingMode: "vertical-rl",
-									color: sideNavActiveColor,
-								}}
-							>
-								中/EN
-							</button>
+							/>
 						</div>
-						<input
-							type="file"
-							ref={fileInputRef}
-							accept="audio/*,.lrc"
-							multiple
-							className="hidden"
-							onChange={handleFileChange}
-						/>
-					</aside>
+					</div>
+					<input
+						type="file"
+						ref={fileInputRef}
+						accept="audio/*,.lrc"
+						multiple
+						className="hidden"
+						onChange={handleFileChange}
+					/>
 				</div>
 
-				{/* Sidebar Right */}
+				{/* 默认歌单 ID Card */}
+				{playlistIdPanelOpen && (
+					<div
+						className="fixed inset-0 z-[64] bg-black/30"
+						onClick={() => setPlaylistIdPanelOpen(false)}
+					/>
+				)}
 				<div
-					className={`side-nav-trigger-right absolute right-0 top-0 h-full z-[60] transition-all pointer-events-auto ${isRightSidebarOpen ? "is-mobile-open-right" : ""}`}
-					onMouseEnter={(e) => {
-						if (e.buttons !== 0) return;
-						if (Date.now() - lastPointerUpTime.current < 100) return;
-						setIsRightSidebarOpen(true);
-					}}
-					onMouseLeave={() => setIsRightSidebarOpen(false)}
+					className={`absolute top-[56px] left-3 z-[70] w-[min(320px,calc(100vw-24px))] pointer-events-auto backdrop-blur-[20px] border rounded-sm overflow-hidden transition-all duration-200 ${playlistIdPanelOpen ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2 pointer-events-none"}`}
+					style={themedPanelStyle(accentHex, 0.92)}
 				>
-					{displaySettings.showRightIcon && (
-						<button
-							onClick={() => setIsRightSidebarOpen(!isRightSidebarOpen)}
-							className={`absolute top-3 right-3 z-50 pointer-events-auto cursor-pointer transition-opacity hover:opacity-100 ${isRightSidebarOpen ? "opacity-100" : "opacity-40"} rounded-full bg-white/10 backdrop-blur-md p-2`}
-							style={{
-								color: isRightSidebarOpen
-									? sideNavActiveColor
-									: isLightSurface
-										? readableAccent
-										: "rgba(255, 255, 255, 0.96)",
-							}}
-						>
-							<Menu size={24} />
-						</button>
-					)}
-					<aside
-						className={`side-nav-panel-right absolute right-0 top-0 h-full flex pointer-events-auto transition-transform duration-300 z-[61] ${isRightSidebarOpen ? "translate-x-0" : "translate-x-full"}`}
-						style={{
-							...themedPanelStyle(accentHex, isLightSurface ? 0.82 : 0.7),
-							borderLeft: `1px solid ${colorWithAlpha(accentHex, isLightSurface ? 0.26 : 0.18)}`,
-							boxShadow: `-16px 0 50px rgba(0,0,0,${isLightSurface ? 0.18 : 0.2})`,
-						}}
+					<div
+						className="flex items-center justify-between p-4 border-b"
+						style={{ borderColor: colorWithAlpha(accentHex, 0.18) }}
 					>
-						<div className="flex h-full w-[540px] max-w-[90vw]">
-							<div
-								className="w-[200px] max-w-[40vw] border-r flex flex-col h-full"
-								style={{ borderColor: colorWithAlpha(accentHex, 0.18) }}
-							>
-								<div className="p-5 text-[10px] uppercase tracking-[0.2em] text-white/50 shrink-0">
-									Playlists
-								</div>
-								<div className="flex-1 overflow-y-auto themed-scrollbar pb-5">
-									{/* Local Playlists */}
-									{playlists.length > 0 && (
-										<div className="mb-4">
-											<div
-												className="px-5 py-2 text-[10px] uppercase tracking-[0.2em] text-white/50 sticky top-0 z-10 backdrop-blur-md"
-												style={{
-													backgroundColor: colorWithAlpha(surfaceHex, 0.8),
-												}}
-											>
-												本地
-											</div>
-											{playlists.map((playlist) => (
-												<button
-													key={playlist.id}
-													onClick={() => setActivePlaylistId(playlist.id)}
-													className={`w-full flex items-center gap-3 px-5 py-3 hover:bg-white/5 transition-colors text-left ${activePlaylistId === playlist.id ? "bg-white/5" : ""}`}
-												>
-													<div className="w-8 h-8 rounded shrink-0 bg-white/10 flex items-center justify-center overflow-hidden">
-														{playlist.songs[0]?.cover ? (
-															<img
-																src={playlist.songs[0].cover}
-																className="w-full h-full object-cover"
-															/>
-														) : (
-															<ListMusic size={14} className="text-white/40" />
-														)}
-													</div>
-													<div className="min-w-0 flex-1">
-														<div
-															className={`text-[12px] truncate ${activePlaylistId === playlist.id ? "text-white" : "text-white/70"}`}
-														>
-															{playlist.name}
-														</div>
-														<div className="text-[10px] text-white/40 mt-0.5">
-															{playlist.songs.length}
-														</div>
-													</div>
-												</button>
-											))}
-										</div>
-									)}
-									{/* Meting Playlist */}
+						<div className="text-[12px] uppercase tracking-[0.2em] text-white/70">
+							默认歌单
+						</div>
+						<button
+							onClick={() => setPlaylistIdPanelOpen(false)}
+							className="text-white/40 hover:text-white transition-colors"
+							aria-label="关闭"
+						>
+							<X size={15} />
+						</button>
+					</div>
+					<div className="p-4 space-y-3">
+						<div>
+							<label className="mb-1.5 block text-[10px] uppercase tracking-[0.18em] text-white/45">
+								歌单 ID
+							</label>
+							<input
+								value={playlistIdInput}
+								onChange={(e) => setPlaylistIdInput(e.target.value)}
+								placeholder="网易云歌单 ID"
+								className="w-full bg-white/[0.035] border rounded-sm px-3 py-2 text-[13px] text-white outline-none focus:border-white/30"
+								style={{ borderColor: colorWithAlpha(accentHex, 0.16) }}
+							/>
+						</div>
+						<div className="text-[11px] leading-relaxed text-white/45">
+							当前:
+							{metingPlaylist.length} 首 · 服务器:
+							{METING_SERVERS.find(
+								(s) => s.value === metingConfig.meting.server,
+							)?.label || metingConfig.meting.server}
+						</div>
+						<button
+							onClick={applyPlaylistId}
+							disabled={!playlistIdInput.trim()}
+							className="w-full rounded-sm border px-3 py-2.5 text-[11px] uppercase tracking-[0.15em] disabled:opacity-40"
+							style={primaryGhostStyle(accentHex)}
+						>
+							应用并加载
+						</button>
+						<button
+							onClick={resetPlaylistId}
+							className="w-full rounded-sm border border-white/10 px-3 py-2.5 text-[11px] uppercase tracking-[0.15em] text-white/55 hover:text-white hover:bg-white/5 transition-colors"
+						>
+							恢复默认
+						</button>
+					</div>
+				</div>
+
+				{/* 歌单 Card */}
+				{isRightSidebarOpen && (
+					<div
+						className="fixed inset-0 z-[64] bg-black/30"
+						onClick={() => setIsRightSidebarOpen(false)}
+					/>
+				)}
+				<div
+					className={`absolute top-[56px] right-3 z-[70] w-[min(740px,calc(100vw-24px))] pointer-events-auto backdrop-blur-[20px] border rounded-sm overflow-hidden transition-all duration-200 ${isRightSidebarOpen ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2 pointer-events-none"}`}
+					style={themedPanelStyle(accentHex, 0.86)}
+				>
+					<div
+						className="flex items-center justify-between p-4 border-b"
+						style={{ borderColor: colorWithAlpha(accentHex, 0.18) }}
+					>
+						<div className="flex items-center gap-3 text-[12px] uppercase tracking-[0.2em] text-white/70">
+							<ListMusic size={15} />
+							歌单
+						</div>
+						<button
+							onClick={() => setIsRightSidebarOpen(false)}
+							className="text-white/40 hover:text-white transition-colors"
+							aria-label="关闭歌单"
+						>
+							<X size={15} />
+						</button>
+					</div>
+					<div className="flex max-h-[68vh]">
+						<div
+							className="w-[160px] sm:w-[200px] max-w-[40vw] border-r flex flex-col"
+							style={{ borderColor: colorWithAlpha(accentHex, 0.18) }}
+						>
+							<div className="flex-1 overflow-y-auto themed-scrollbar pb-4">
+								{/* Local Playlists */}
+								{playlists.length > 0 && (
 									<div className="mb-4">
 										<div
 											className="px-5 py-2 text-[10px] uppercase tracking-[0.2em] text-white/50 sticky top-0 z-10 backdrop-blur-md"
@@ -1421,94 +1503,223 @@ export function UI({
 												backgroundColor: colorWithAlpha(surfaceHex, 0.8),
 											}}
 										>
-											Meting 歌单
+											我的歌单
+										</div>
+										{playlists.map((playlist) => (
+											<button
+												key={playlist.id}
+												onClick={() => setActivePlaylistId(playlist.id)}
+												className={`w-full flex items-center gap-3 px-5 py-3 hover:bg-white/5 transition-colors text-left ${activePlaylistId === playlist.id ? "bg-white/5" : ""}`}
+											>
+												<div className="w-8 h-8 rounded shrink-0 bg-white/10 flex items-center justify-center overflow-hidden">
+													{playlist.songs[0]?.cover ? (
+														<img
+															src={playlist.songs[0].cover}
+															className="w-full h-full object-cover"
+														/>
+													) : (
+														<ListMusic size={14} className="text-white/40" />
+													)}
+												</div>
+												<div className="min-w-0 flex-1">
+													<div
+														className={`text-[12px] truncate ${activePlaylistId === playlist.id ? "text-white" : "text-white/70"}`}
+													>
+														{playlist.name}
+													</div>
+													<div className="text-[10px] text-white/40 mt-0.5">
+														{playlist.songs.length}
+													</div>
+												</div>
+											</button>
+										))}
+									</div>
+								)}
+								{/* Meting Playlist */}
+								<div className="mb-4">
+									<div
+										className="px-5 py-2 text-[10px] uppercase tracking-[0.2em] text-white/50 sticky top-0 z-10 backdrop-blur-md"
+										style={{
+											backgroundColor: colorWithAlpha(surfaceHex, 0.8),
+										}}
+									>
+										Meting 歌单
+									</div>
+									<button
+										onClick={() => {
+											setPlayQueue(metingPlaylist);
+											setActivePlaylistId("");
+										}}
+										className={`w-full flex items-center gap-3 px-5 py-3 hover:bg-white/5 transition-colors text-left ${activePlaylistId === "" && playQueue === metingPlaylist ? "bg-white/5" : ""}`}
+									>
+										<div className="w-8 h-8 rounded shrink-0 bg-white/10 flex items-center justify-center overflow-hidden text-white/40">
+											<Music size={14} />
+										</div>
+										<div className="min-w-0 flex-1">
+											<div className="text-[12px] truncate text-white/70">
+												默认歌单
+											</div>
+											<div className="text-[10px] text-white/40 mt-0.5">
+												{metingPlaylist.length}首
+											</div>
+										</div>
+									</button>
+								</div>
+								{/* Local Music Folder */}
+								{folderPlaylist.length > 0 && (
+									<div className="mb-4">
+										<div
+											className="px-5 py-2 text-[10px] uppercase tracking-[0.2em] text-white/50 sticky top-0 z-10 backdrop-blur-md"
+											style={{
+												backgroundColor: colorWithAlpha(surfaceHex, 0.8),
+											}}
+										>
+											目录音乐
 										</div>
 										<button
 											onClick={() => {
-												setPlayQueue(metingPlaylist);
-												setActivePlaylistId("");
+												setPlayQueue(folderPlaylist);
+												setActivePlaylistId("folder");
 											}}
-											className={`w-full flex items-center gap-3 px-5 py-3 hover:bg-white/5 transition-colors text-left ${activePlaylistId === "" && playQueue === metingPlaylist ? "bg-white/5" : ""}`}
+											className={`w-full flex items-center gap-3 px-5 py-3 hover:bg-white/5 transition-colors text-left ${activePlaylistId === "folder" ? "bg-white/5" : ""}`}
 										>
 											<div className="w-8 h-8 rounded shrink-0 bg-white/10 flex items-center justify-center overflow-hidden text-white/40">
-												<Music size={14} />
-											</div>
-											<div className="min-w-0 flex-1">
-												<div className="text-[12px] truncate text-white/70">
-													默认歌单
-												</div>
-												<div className="text-[10px] text-white/40 mt-0.5">
-													{metingPlaylist.length}首
-												</div>
-											</div>
-										</button>
-									</div>
-								</div>
-							</div>
-							<div className="flex-1 flex flex-col h-full">
-								<div className="flex items-center justify-between p-5 shrink-0">
-									<div className="text-[10px] uppercase tracking-[0.2em] text-white/50">
-										Tracks
-									</div>
-									<div className="text-[10px] uppercase tracking-[0.2em] text-white/30">
-										{(activePlaylistId
-											? activePlaylist?.songs.length
-											: metingPlaylist.length) || 0}{" "}
-										Tracks
-									</div>
-								</div>
-								<div className="flex-1 overflow-y-auto themed-scrollbar pb-5">
-									{(activePlaylistId
-										? activePlaylist?.songs || []
-										: metingPlaylist
-									).map((song: MetingSong, index: number) => (
-										<button
-											key={songIdentity(song)}
-											onClick={() =>
-												loadMetingSong(
-													song,
-													activePlaylistId
-														? activePlaylist?.songs
-														: metingPlaylist,
-												)
-											}
-											className={`w-full flex items-center gap-3 px-5 py-3 hover:bg-white/5 transition-colors text-left group ${currentSongId === songIdentity(song) ? "bg-white/5" : ""}`}
-										>
-											<div className="w-4 text-center text-[10px] text-white/30 group-hover:hidden shrink-0">
-												{(index + 1).toString().padStart(2, "0")}
-											</div>
-											<div className="w-4 text-center hidden group-hover:flex items-center justify-center text-white shrink-0">
-												<Play size={10} />
-											</div>
-											<div className="w-8 h-8 rounded shrink-0 bg-white/10 overflow-hidden flex items-center justify-center">
-												{song.cover ? (
+												{folderCover || folderPlaylist[0]?.cover ? (
 													<img
-														src={song.cover}
+														src={folderCover || folderPlaylist[0]?.cover}
 														className="w-full h-full object-cover"
 													/>
 												) : (
-													<ListMusic size={14} className="text-white/40" />
+													<ListMusic size={14} />
 												)}
 											</div>
 											<div className="min-w-0 flex-1">
-												<div
-													className={`text-[12px] truncate ${currentSongId === songIdentity(song) ? "text-white" : "text-white/80"}`}
-												>
-													{song.name}
+												<div className="text-[12px] truncate text-white/70">
+													public/music
 												</div>
-												<div className="text-[10px] text-white/40 mt-0.5 truncate">
-													{song.artist || "Unknown"}
+												<div className="text-[10px] text-white/40 mt-0.5">
+													{folderPlaylist.length}首
 												</div>
-											</div>
-											<div className="text-[10px] text-white/30 shrink-0">
-												{song.duration ? formatTime(song.duration / 1000) : ""}
 											</div>
 										</button>
-									))}
-								</div>
+									</div>
+								)}
+								{/* Local Files */}
+								{localPlaylist.length > 0 && (
+									<div className="mb-4">
+										<div
+											className="px-5 py-2 text-[10px] uppercase tracking-[0.2em] text-white/50 sticky top-0 z-10 backdrop-blur-md"
+											style={{
+												backgroundColor: colorWithAlpha(surfaceHex, 0.8),
+											}}
+										>
+											上传文件
+										</div>
+										<button
+											onClick={() => {
+												setPlayQueue(localPlaylist);
+												setActivePlaylistId("local");
+											}}
+											className={`w-full flex items-center gap-3 px-5 py-3 hover:bg-white/5 transition-colors text-left ${activePlaylistId === "local" ? "bg-white/5" : ""}`}
+										>
+											<div className="w-8 h-8 rounded shrink-0 bg-white/10 flex items-center justify-center overflow-hidden text-white/40">
+												{localPlaylist[0]?.cover ? (
+													<img
+														src={localPlaylist[0].cover}
+														className="w-full h-full object-cover"
+													/>
+												) : (
+													<ListMusic size={14} />
+												)}
+											</div>
+											<div className="min-w-0 flex-1">
+												<div className="text-[12px] truncate text-white/70">
+													上传的文件
+												</div>
+												<div className="text-[10px] text-white/40 mt-0.5">
+													{localPlaylist.length}首
+												</div>
+											</div>
+										</button>
+									</div>
+								)}
 							</div>
 						</div>
-					</aside>
+						<div className="flex-1 flex flex-col min-w-0">
+							<div className="flex items-center justify-between px-5 py-4 shrink-0">
+								<div className="text-[10px] uppercase tracking-[0.2em] text-white/50">
+									Tracks
+								</div>
+								<div className="text-[10px] uppercase tracking-[0.2em] text-white/30">
+									{activePlaylistId === "folder"
+										? folderPlaylist.length
+										: activePlaylistId === "local"
+											? localPlaylist.length
+											: (activePlaylistId
+													? activePlaylist?.songs.length
+													: metingPlaylist.length) || 0}{" "}
+									Tracks
+								</div>
+							</div>
+							<div className="flex-1 overflow-y-auto themed-scrollbar pb-4">
+								{(activePlaylistId === "folder"
+									? folderPlaylist
+									: activePlaylistId === "local"
+										? localPlaylist
+										: activePlaylistId
+											? activePlaylist?.songs || []
+											: metingPlaylist
+								).map((song: MetingSong, index: number) => (
+									<button
+										key={songIdentity(song)}
+										onClick={() =>
+											loadMetingSong(
+												song,
+												activePlaylistId === "folder"
+													? folderPlaylist
+													: activePlaylistId === "local"
+														? localPlaylist
+														: activePlaylistId
+															? activePlaylist?.songs
+															: metingPlaylist,
+											)
+										}
+										className={`w-full flex items-center gap-3 px-5 py-3 hover:bg-white/5 transition-colors text-left group ${currentSongId === songIdentity(song) ? "bg-white/5" : ""}`}
+									>
+										<div className="w-4 text-center text-[10px] text-white/30 group-hover:hidden shrink-0">
+											{(index + 1).toString().padStart(2, "0")}
+										</div>
+										<div className="w-4 text-center hidden group-hover:flex items-center justify-center text-white shrink-0">
+											<Play size={10} />
+										</div>
+										<div className="w-8 h-8 rounded shrink-0 bg-white/10 overflow-hidden flex items-center justify-center">
+											{song.cover ? (
+												<img
+													src={song.cover}
+													className="w-full h-full object-cover"
+												/>
+											) : (
+												<ListMusic size={14} className="text-white/40" />
+											)}
+										</div>
+										<div className="min-w-0 flex-1">
+											<div
+												className={`text-[12px] truncate ${currentSongId === songIdentity(song) ? "text-white" : "text-white/80"}`}
+											>
+												{song.name}
+											</div>
+											<div className="text-[10px] text-white/40 mt-0.5 truncate">
+												{song.artist || "Unknown"}
+											</div>
+										</div>
+										<div className="text-[10px] text-white/30 shrink-0">
+											{song.duration ? formatTime(song.duration / 1000) : ""}
+										</div>
+									</button>
+								))}
+							</div>
+						</div>
+					</div>
 				</div>
 
 				{/* Brand Mark / Settings Toggle */}
@@ -1517,7 +1728,8 @@ export function UI({
 					className={`absolute top-3 left-3 z-50 pointer-events-auto cursor-pointer transition-opacity hover:opacity-100 ${isMobileSideNavOpen ? "opacity-100" : "opacity-40"} rounded-full bg-white/10 backdrop-blur-md p-2`}
 					aria-label="功能菜单"
 					onClick={() => {
-						openMobileSideNav();
+						markSideNavHintSeen();
+						setIsMobileSideNavOpen((open) => !open);
 					}}
 					style={{
 						color: isMobileSideNavOpen
@@ -1529,6 +1741,25 @@ export function UI({
 				>
 					<Settings size={24} />
 				</button>
+
+				{/* 歌单按钮 */}
+				{displaySettings.showRightIcon && (
+					<button
+						type="button"
+						onClick={() => setIsRightSidebarOpen((open) => !open)}
+						className={`absolute top-3 right-3 z-50 pointer-events-auto cursor-pointer transition-opacity hover:opacity-100 ${isRightSidebarOpen ? "opacity-100" : "opacity-40"} rounded-full bg-white/10 backdrop-blur-md p-2`}
+						aria-label="歌单"
+						style={{
+							color: isRightSidebarOpen
+								? sideNavActiveColor
+								: isLightSurface
+									? readableAccent
+									: "rgba(255, 255, 255, 0.96)",
+						}}
+					>
+						<Menu size={24} />
+					</button>
+				)}
 
 				{/* Search Panel */}
 				{showSearchPanel && (
@@ -1712,113 +1943,6 @@ export function UI({
 								<Plus size={15} />
 							</button>
 						</form>
-					</div>
-				)}
-
-				{/* Playlist Panel */}
-				{showPlaylistPanel && (
-					<div
-						className="absolute top-[40px] left-[100px] z-50 sm:left-[100px] w-[min(420px,calc(100vw-32px))] max-h-[74vh] z-[65] pointer-events-auto backdrop-blur-[20px] border rounded-sm overflow-hidden"
-						style={themedPanelStyle(accentHex, 0.84)}
-					>
-						<div
-							className="p-5 border-b"
-							style={{ borderColor: colorWithAlpha(accentHex, 0.18) }}
-						>
-							<div className="flex items-center justify-between mb-4">
-								<div className="flex items-center gap-3 text-[12px] uppercase tracking-[0.2em] text-white/70">
-									<ListMusic size={15} />
-									歌单
-								</div>
-								<button
-									onClick={() => setShowPlaylistPanel(false)}
-									className="text-[10px] uppercase tracking-[0.15em] text-white/40 hover:text-white"
-								>
-									关闭
-								</button>
-							</div>
-							<div className="flex items-center gap-3">
-								<div className="themed-scrollbar flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
-									{playlists.map((playlist) => (
-										<button
-											key={playlist.id}
-											onClick={() => setActivePlaylistId(playlist.id)}
-											className={`flex-shrink-0 px-3 py-2 rounded-sm border text-[10px] uppercase tracking-[0.12em] transition-colors ${activePlaylist?.id === playlist.id ? "" : "text-white/45 border-white/10 hover:text-white"}`}
-											style={
-												activePlaylist?.id === playlist.id
-													? activeControlStyle(accentHex)
-													: undefined
-											}
-										>
-											{playlist.name}
-										</button>
-									))}
-								</div>
-								<button
-									onClick={() =>
-										activePlaylist &&
-										setPendingDelete({
-											type: "playlist",
-											playlistId: activePlaylist.id,
-											label: activePlaylist.name,
-										})
-									}
-									disabled={!activePlaylist || playlists.length <= 1}
-									className="h-8 w-8 flex-shrink-0 rounded-sm border border-white/10 text-white/45 hover:text-[#ef4444] disabled:opacity-20 disabled:hover:text-white/45 flex items-center justify-center"
-									title="删除歌单"
-								>
-									<Trash2 size={14} />
-								</button>
-							</div>
-						</div>
-						<div className="themed-scrollbar max-h-[52vh] overflow-y-auto">
-							{activePlaylist && activePlaylist.songs.length > 0 ? (
-								activePlaylist.songs.map((song) => (
-									<button
-										key={songIdentity(song)}
-										onClick={() => loadMetingSong(song, activePlaylist.songs)}
-										className="relative flex w-full items-center gap-3 px-5 py-4 pr-16 text-left border-b border-white/5 hover:bg-white/5 transition-colors"
-									>
-										<CoverArt
-											src={song.cover}
-											title={song.name}
-											className="h-10 w-10"
-											iconSize={15}
-										/>
-										<div className="min-w-0 flex-1">
-											<div className="text-[13px] text-white truncate">
-												{song.name}
-											</div>
-											<div className="mt-1 text-[11px] text-white/45 truncate">
-												{song.artist || "Unknown artist"} -{" "}
-												{song.album || "Unknown album"}
-											</div>
-										</div>
-										<span
-											role="button"
-											tabIndex={0}
-											onClick={(e) => {
-												e.stopPropagation();
-												setPendingDelete({
-													type: "song",
-													playlistId: activePlaylist.id,
-													songId: songIdentity(song),
-													label: song.name,
-												});
-											}}
-											className="absolute right-5 top-1/2 -translate-y-1/2 h-8 w-8 rounded-sm border border-white/10 text-white/45 hover:text-[#ef4444] transition-colors flex items-center justify-center"
-											title="从歌单移除"
-										>
-											<Trash2 size={14} />
-										</span>
-									</button>
-								))
-							) : (
-								<div className="px-5 py-8 text-[12px] text-white/40">
-									此歌单暂无歌曲
-								</div>
-							)}
-						</div>
 					</div>
 				)}
 

@@ -1,7 +1,11 @@
 export interface AudioMetadata {
 	displayName: string;
+	title: string;
+	artist: string;
+	album: string;
 	lyrics: string | null;
 	cover: string | null;
+	duration: number; // seconds, 0 if unknown
 }
 
 function getFallbackDisplayName(fallbackName: string): string {
@@ -30,6 +34,27 @@ function pictureToDataUrl(
 	return `data:${picture.format || "image/jpeg"};base64,${btoa(binary)}`;
 }
 
+function splitDisplayName(displayName: string): [string, string] {
+	const index = displayName.indexOf(" - ");
+	if (index > 0) {
+		return [
+			displayName.slice(0, index).trim(),
+			displayName.slice(index + 3).trim(),
+		];
+	}
+	return ["", displayName];
+}
+
+/** 从文件名推断标题与歌手（"歌手 - 标题.mp3" 模式） */
+export function parseFileName(fileName: string): {
+	title: string;
+	artist: string;
+} {
+	const displayName = getFallbackDisplayName(fileName);
+	const [artist, title] = splitDisplayName(displayName);
+	return { title: title || displayName, artist };
+}
+
 export async function extractAudioMetadata(
 	blob: Blob,
 	fallbackName: string,
@@ -41,6 +66,7 @@ export async function extractAudioMetadata(
 		const metadata = await mm.parseBlob(blob);
 		const title = metadata.common.title?.trim();
 		const artist = metadata.common.artist?.trim();
+		const album = metadata.common.album?.trim();
 		const displayName = title
 			? artist
 				? `${artist} - ${title}`
@@ -48,13 +74,46 @@ export async function extractAudioMetadata(
 			: fallbackDisplayName;
 		const lyrics = metadata.common.lyrics?.find(Boolean) || null;
 		const cover = pictureToDataUrl(metadata.common.picture?.[0]);
+		const duration = Number.isFinite(metadata.format.duration)
+			? metadata.format.duration || 0
+			: 0;
 
-		return { displayName, lyrics, cover };
+		if (title) {
+			return {
+				displayName,
+				title,
+				artist: artist || "",
+				album: album || "",
+				lyrics,
+				cover,
+				duration,
+			};
+		}
+
+		const [fallbackArtist, fallbackTitle] = splitDisplayName(displayName);
+		return {
+			displayName,
+			title: fallbackTitle,
+			artist: fallbackArtist,
+			album: album || "",
+			lyrics,
+			cover,
+			duration,
+		};
 	} catch (error) {
 		console.warn("Error reading tags with music-metadata-browser:", error);
 	}
 
-	return { displayName: fallbackDisplayName, lyrics: null, cover: null };
+	const [fallbackArtist, fallbackTitle] = splitDisplayName(fallbackDisplayName);
+	return {
+		displayName: fallbackDisplayName,
+		title: fallbackTitle,
+		artist: fallbackArtist,
+		album: "",
+		lyrics: null,
+		cover: null,
+		duration: 0,
+	};
 }
 
 export async function extractLyricsFromAudio(

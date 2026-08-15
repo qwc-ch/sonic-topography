@@ -60,7 +60,7 @@ export interface MetingSong {
 	lrc: string;
 	duration: number;
 	// 旧字段兼容（保留为可选）
-	provider?: "meting" | "netease" | "qq";
+	provider?: "meting" | "netease" | "qq" | "local";
 	fee?: number;
 	mid?: string;
 	songmid?: string;

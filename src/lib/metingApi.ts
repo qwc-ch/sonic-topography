@@ -3,6 +3,7 @@
 
 import {
 	buildMetingUrl,
+	getMetingPlaylistId,
 	type MetingServer,
 	type MetingType,
 	metingConfig,
@@ -50,7 +51,7 @@ function normalizeItem(item: RawMetingItem): MetingSong {
 export async function fetchMetingPlaylist(
 	server: MetingServer = metingConfig.meting.server,
 	type: MetingType = metingConfig.meting.type,
-	id: string = metingConfig.meting.id,
+	id: string = getMetingPlaylistId(),
 ): Promise<MetingSong[]> {
 	const m = metingConfig.meting;
 	const apis = [m.api, ...(m.fallbackApis || [])];
@@ -148,4 +149,63 @@ export async function loadMetingLyrics(song: MetingSong): Promise<string> {
 		}
 	}
 	return lrc;
+}
+
+// 按歌名+歌手在线匹配歌词（供本地歌曲使用）：先搜索歌曲再取 lrc 类型
+export async function fetchMetingLyricsBySong(
+	songName: string,
+	artist: string,
+): Promise<string> {
+	const meta = await fetchMetingSongMeta(songName, artist);
+	return meta.lrc;
+}
+
+// 按歌名+歌手在线匹配封面与歌词（供本地歌曲使用，一次搜索取两者）
+export async function fetchMetingSongMeta(
+	songName: string,
+	artist: string,
+): Promise<{ cover: string; lrc: string }> {
+	const keywords =
+		artist && artist !== "未知歌手" ? `${artist} - ${songName}` : songName;
+	const results = await searchMetingSongs(
+		keywords,
+		metingConfig.searchServer,
+		5,
+	);
+	if (results.length === 0) return { cover: "", lrc: "" };
+	const candidate = results.find((item) => item.name === songName) || results[0];
+
+	let lrc = "";
+	// 搜索结果自带 lrc（可能是 URL 或文本）时直接使用
+	if (candidate.lrc) {
+		const direct = await loadMetingLyrics(candidate);
+		if (direct.trim()) lrc = direct;
+	}
+
+	if (!lrc) {
+		const matchId = candidate.url.match(/[?&]id=([^&]+)/);
+		const matchServer = candidate.url.match(/[?&]server=([^&]+)/);
+		if (matchId) {
+			const server = (matchServer?.[1] || metingConfig.meting.server) as MetingServer;
+			const apis = [metingConfig.meting.api, ...(metingConfig.meting.fallbackApis || [])];
+
+			for (const template of apis) {
+				if (!template) continue;
+				try {
+					const fetchUrl = buildMetingUrl(template, server, "lrc", matchId[1]);
+					const res = await fetch(fetchUrl);
+					if (!res.ok) throw new Error(`HTTP ${res.status}`);
+					const text = await res.text();
+					if (text.trim() && !text.startsWith("{")) {
+						lrc = text;
+						break;
+					}
+				} catch (e) {
+					console.warn("Meting lyric failed for", template, e);
+				}
+			}
+		}
+	}
+
+	return { cover: candidate.cover || "", lrc };
 }
